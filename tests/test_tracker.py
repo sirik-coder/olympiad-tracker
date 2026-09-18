@@ -290,7 +290,10 @@ def test_engine_limits_are_set_by_depth_not_by_a_tight_clock():
     assert t.engine_screen_ms >= 1000, "too tight to reliably reach the depth"
     assert t.engine_movetime_ms >= 3000
     assert t.engine_screen_depth >= 12
-    assert t.engine_depth >= 18,         "depth 16 produced a false 'threw away a win' alert in a won endgame"
+    assert t.engine_depth >= 18
+    assert t.engine_confirm_depth >= 22,         "depth 18 read a drawn-looking perpetual as 0.00 and alerted on it"
+    assert t.engine_confirm_ms >= 8000
+    assert t.engine_confirm_depth > t.engine_depth > t.engine_screen_depth,         "the three passes must actually get deeper"
 
 
 def test_the_linter_actually_catches_things():

@@ -142,6 +142,7 @@ def main() -> int:
     # candidate positions as the round throws up.
     thresholds.max_engine_positions_per_poll = 100000
     thresholds.max_screen_positions_per_poll = 100000
+    thresholds.max_confirm_positions_per_poll = 100000
 
     stockfish = None if args.no_engine else find_stockfish()
     if not args.no_engine and not stockfish:

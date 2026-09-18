@@ -177,7 +177,7 @@ Live analysis runs in three passes, to keep a poll inside its time slot:
 |---|---|---|---|
 | screen | every new move | 12 | enough to say "something happened here", about 0.1s each |
 | verify | only flagged moves | 18 | shallow searches are noisy, and a false alert costs more than a missed one |
-| confirm | only sacrifice candidates | 18, top 2 moves | was it the *only* move |
+| confirm | only moves about to be alerted | 22 | depth 18 is not always enough to be sure |
 
 Positions are cached between passes, because the position after one move is the
 position before the next.
@@ -190,10 +190,17 @@ alert threshold through to the deep check. A cheap filter that applies the real
 rule throws away real findings, because the shallow number it is judging is the
 unreliable one.
 
-**Depth 18 is a floor, not a round number.** At depth 16 a won endgame that
-Lichess reads as mate-in-10 becoming mate-in-9 — nothing happening at all —
-came out as 93 to 50 and produced a confident "threw away a win" alert that was
-simply wrong. Depth 18 sees it correctly, at about 1.5 seconds a position.
+**The last pass is deeper than it looks like it needs to be.** There is an
+endgame in Round 2 that Lichess scores as mate-in-10 becoming mate-in-9 —
+nothing happening at all. At depth 18, from a cold hash table, Stockfish
+evaluates it as exactly **0.00**, because it believes White has a perpetual
+check. That reads as a player throwing away a win, and the alert fires. At
+depth 22 it evaluates it correctly and the alert does not.
+
+The same position came out at −7.06 at depth 18 in an isolated test, which made
+the bug look fixed when it was not — that process had a warm hash table from
+earlier searches. Anything measured on one lucky search is not measured. Depth
+22 costs 2–3 seconds a position, and it runs on perhaps two moves per poll.
 
 **Search limits are set by depth, not by a tight clock.** A search capped at
 250ms returns whatever it reached, which depends on how busy the machine is —

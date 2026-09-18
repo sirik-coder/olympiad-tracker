@@ -82,14 +82,25 @@ class Thresholds:
     # than it is, so blunders go missing. That is not theory - screening at
     # depth 12 capped to 250ms read a real 0.84 -> -3.15 collapse as
     # 0.76 -> -2.03, just inside the threshold, and the alert never fired.
-    # Depth 18 is the floor for the deciding search, not a round number. At 16
-    # a won endgame (Lichess: mate in 10 becoming mate in 9, so nothing at all
-    # happened) read as 93 -> 50 and produced a "threw away a win" alert that
-    # was simply wrong. Depth 18 sees it correctly at about 1.5s a position;
-    # depth 20 costs 4.8s and buys nothing here.
     engine_depth: int = 18
     engine_movetime_ms: int = 6000
     max_engine_positions_per_poll: int = 60
+    #
+    # A third and deepest pass, run only on the handful of moves that are about
+    # to become an alert. It exists because depth 18 is not always enough to be
+    # confident, and being wrong in public is the expensive failure.
+    #
+    # The case that proved it: an endgame Lichess scores as mate in 10 becoming
+    # mate in 9, where nothing happened at all. At depth 18 from a cold hash
+    # table Stockfish returns exactly 0.00 there - it believes White has a
+    # perpetual - which reads as a player throwing away a win, and the alert
+    # fires. At depth 22 it sees -12.23 and the alert correctly does not. The
+    # same position evaluated -7.06 at depth 18 in an earlier test only because
+    # that process had a warm hash from previous searches, which is what made
+    # the bug look fixed when it was not.
+    engine_confirm_depth: int = 22
+    engine_confirm_ms: int = 12000
+    max_confirm_positions_per_poll: int = 8
     #
     # The screen only has to tell "still equal" from "something happened", and
     # it may have to do that for a few hundred positions in one poll.

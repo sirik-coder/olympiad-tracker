@@ -19,13 +19,20 @@ in three passes:
            one move is the position before the next.
 
   verify   Only for moves the screen flagged, at full depth. Shallow searches
-           are noisy, and a false blunder alert is worse than a missed one:
-           it goes out to a Slack channel that people are meant to trust.
+           are noisy, and a false alert is worse than a missed one: it goes
+           out to a Slack channel that people are meant to trust.
 
-  confirm  Only for brilliancy candidates, at full depth with the top two
-           moves. A brilliancy is not a sacrifice that worked, it is a
-           sacrifice that was the only thing that worked, and knowing that
-           needs the runner-up move as well as the best one.
+  confirm  Only for the handful about to become an alert, deeper still, and
+           for a brilliancy with the top two moves rather than one. A
+           brilliancy is not a sacrifice that worked, it is a sacrifice that
+           was the only thing that worked, and knowing that needs the
+           runner-up as well as the best move.
+
+           This last pass is not belt and braces. Depth 18 called a position
+           Lichess scores as mate in 10 becoming mate in 9 - nothing happening
+           at all - exactly 0.00, because from a cold hash table it believed
+           White had a perpetual. That reads as a player throwing away a win,
+           and the alert fired. At depth 22 it does not.
 """
 
 from __future__ import annotations
@@ -132,7 +139,7 @@ class Detector:
         # roughly doubles the volume and brings in weaker players' mistakes.
         self.alert_both_sides = alert_both_sides
         self.max_backfill_plies = max_backfill_plies
-        # (fen, deep) -> Score from the point of view of the side to move.
+        # (fen, tier) -> Score from the point of view of the side to move.
         self._cache = {}
 
     def reset_cache(self):
@@ -140,32 +147,34 @@ class Detector:
 
     # -- evaluations --------------------------------------------------------
 
-    def _engine_score(self, board: chess.Board, deep: bool):
+    # Cheapest first. A result from a later tier answers a request for an
+    # earlier one, because it is strictly better information.
+    TIERS = ("screen", "deep", "confirm")
+
+    def _engine_score(self, board: chess.Board, tier: str):
         """Engine score for `board`, from the side to move. None if we cannot.
 
         Cached, because the position after one move is the position before the
         next one, so a run of moves costs one search per move rather than two.
-        A deep result also answers a later shallow request: it is strictly
-        better information.
         """
         if not (self.analyst and self.analyst.available):
             return None
         fen = board.board_fen() + " " + ("w" if board.turn else "b") + \
             " " + board.castling_xfen() + " " + str(board.ep_square)
 
-        if (fen, True) in self._cache:
-            return self._cache[(fen, True)]
-        if not deep and (fen, False) in self._cache:
-            return self._cache[(fen, False)]
+        wanted = self.TIERS.index(tier)
+        for other in self.TIERS[wanted:]:
+            if (fen, other) in self._cache:
+                return self._cache[(fen, other)]
 
-        lines = self.analyst.top_moves(board, count=1, deep=deep)
+        lines = self.analyst.top_moves(board, count=1, tier=tier)
         if not lines:
             return None
         score = lines[0].score
-        self._cache[(fen, deep)] = score
+        self._cache[(fen, tier)] = score
         return score
 
-    def _resolve(self, move, deep: bool):
+    def _resolve(self, move, tier: str = "deep"):
         """Winning chances before and after `move`, from the mover's side.
 
         Returns (before, after, before_text, after_text) or None. The feed's
@@ -186,7 +195,7 @@ class Detector:
             after_text = format_score(move.eval_after.white())
 
         if before is None:
-            score = self._engine_score(move.board_before, deep)
+            score = self._engine_score(move.board_before, tier)
             if score is None:
                 return None
             before = score_to_winning_chances(score)
@@ -195,7 +204,7 @@ class Detector:
         if after is None:
             # This score is from the side to move *after* the move, which is
             # the opponent. Flip it to get the mover's view.
-            score = self._engine_score(move.board_after, deep)
+            score = self._engine_score(move.board_after, tier)
             if score is None:
                 return None
             after = 100.0 - score_to_winning_chances(score)
@@ -257,7 +266,8 @@ class Detector:
         """
         if not (self.analyst and self.analyst.available):
             return False, 0.0
-        lines = self.analyst.top_moves(move.board_before, count=2, deep=True)
+        lines = self.analyst.top_moves(move.board_before, count=2,
+                                       tier="confirm")
         if not lines or lines[0].move != move.move:
             return False, 0.0      # the engine would have played something else
         if len(lines) < 2:
@@ -300,28 +310,39 @@ class Detector:
                 processed_to = move.ply
                 continue
 
-            screened = self._resolve(move, deep=False)
+            # Pass one, on everything: is this worth a proper look?
+            # Deliberately generous, because the number it judges is the least
+            # reliable one we have.
+            screened = self._resolve(move, tier="screen")
             if screened is None:
-                # Out of engine budget, or no engine at all. Stop here rather
-                # than marking the rest of the game as seen.
+                # Out of budget, or no engine at all. Stop here rather than
+                # marking the rest of the game as seen.
                 break
             before, after, before_text, after_text = screened
-
-            # First pass: is this worth a proper look? Deliberately generous.
             if not (self._blunder_candidate(before, after)
                     or self._sacrifice_candidate(move, before, after,
                                                  slack=self.SCREEN_SLACK)):
                 processed_to = move.ply
                 continue
 
-            # Second pass: decide, at full depth. Nothing reaches Slack on the
-            # strength of a shallow search.
-            checked = self._resolve(move, deep=True)
+            # Pass two, on the few that survived: full depth, still generous.
+            checked = self._resolve(move, tier="deep")
             if checked is None:
-                # Out of deep budget. Leave this move unread so the next poll
-                # picks it up, rather than judging it on the shallow numbers.
                 break
             before, after, before_text, after_text = checked
+            if not (self._blunder_candidate(before, after)
+                    or self._sacrifice_candidate(move, before, after,
+                                                 slack=self.SCREEN_SLACK / 2)):
+                processed_to = move.ply
+                continue
+
+            # Pass three, on the handful about to become an alert: deepest.
+            # Depth 18 is not always enough to be sure, and being confidently
+            # wrong in a channel people trust is the expensive failure.
+            confirmed = self._resolve(move, tier="confirm")
+            if confirmed is None:
+                break
+            before, after, before_text, after_text = confirmed
 
             subkind = self._blunder_subkind(before, after)
             looks_sacrificial = self._sacrifice_candidate(move, before, after)
@@ -338,7 +359,7 @@ class Detector:
                 )
                 if not finding.better_move and self.analyst and self.analyst.available:
                     lines = self.analyst.top_moves(move.board_before, count=1,
-                                                   deep=True)
+                                                   tier="confirm")
                     if lines:
                         finding.better_move = lines[0].san
                 finding.detail = _plain_blunder_detail(finding)

@@ -129,12 +129,31 @@ class Analyst:
         self.thresholds = thresholds
         self.path = path or find_stockfish()
         self._engine = None
-        self.positions_analysed = 0   # deep searches, for confirming brilliancies
-        self.positions_screened = 0   # shallow searches, for filling feed gaps
+        self.positions_screened = 0   # shallow, every new move
+        self.positions_analysed = 0   # full depth, only flagged moves
+        self.positions_confirmed = 0  # deepest, only moves about to be alerted
 
     def reset_budget(self):
-        self.positions_analysed = 0
         self.positions_screened = 0
+        self.positions_analysed = 0
+        self.positions_confirmed = 0
+
+    def _spend(self, tier: str) -> bool:
+        """Take one unit from this tier's budget. False if it is used up."""
+        t = self.thresholds
+        if tier == "screen":
+            if self.positions_screened >= t.max_screen_positions_per_poll:
+                return False
+            self.positions_screened += 1
+        elif tier == "confirm":
+            if self.positions_confirmed >= t.max_confirm_positions_per_poll:
+                return False
+            self.positions_confirmed += 1
+        else:
+            if self.positions_analysed >= t.max_engine_positions_per_poll:
+                return False
+            self.positions_analysed += 1
+        return True
 
     @property
     def available(self) -> bool:
@@ -162,28 +181,28 @@ class Analyst:
                 pass
             self._engine = None
 
-    def _limit(self, deep: bool = True) -> chess.engine.Limit:
+    def _limit(self, tier: str = "deep") -> chess.engine.Limit:
         t = self.thresholds
-        if deep:
-            return chess.engine.Limit(depth=t.engine_depth,
-                                      time=t.engine_movetime_ms / 1000.0)
-        return chess.engine.Limit(depth=t.engine_screen_depth,
-                                  time=t.engine_screen_ms / 1000.0)
+        if tier == "screen":
+            return chess.engine.Limit(depth=t.engine_screen_depth,
+                                      time=t.engine_screen_ms / 1000.0)
+        if tier == "confirm":
+            return chess.engine.Limit(depth=t.engine_confirm_depth,
+                                      time=t.engine_confirm_ms / 1000.0)
+        return chess.engine.Limit(depth=t.engine_depth,
+                                  time=t.engine_movetime_ms / 1000.0)
 
-    def top_moves(self, board: chess.Board, count: int = 2, deep: bool = True):
-        """Best `count` moves, best first. None if the engine is unavailable."""
+    def top_moves(self, board: chess.Board, count: int = 2, tier: str = "deep"):
+        """Best `count` moves, best first. None if the engine is unavailable.
+
+        `tier` is one of "screen", "deep" or "confirm", cheapest first.
+        """
         if self._engine is None:
             return None
-        if deep:
-            if self.positions_analysed >= self.thresholds.max_engine_positions_per_poll:
-                return None
-            self.positions_analysed += 1
-        else:
-            if self.positions_screened >= self.thresholds.max_screen_positions_per_poll:
-                return None
-            self.positions_screened += 1
+        if not self._spend(tier):
+            return None
         try:
-            infos = self._engine.analyse(board, self._limit(deep), multipv=count)
+            infos = self._engine.analyse(board, self._limit(tier), multipv=count)
         except Exception as exc:
             print("  ! engine error: %s" % exc)
             return None
@@ -211,5 +230,5 @@ class Analyst:
         evaluation is missing, and there may be hundreds of those in one poll
         if the live feed is running without them.
         """
-        lines = self.top_moves(board, count=1, deep=False)
+        lines = self.top_moves(board, count=1, tier="screen")
         return lines[0].score if lines else None
