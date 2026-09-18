@@ -20,12 +20,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import os
 import sys
 import time
 
 from olympiad.config import Thresholds, WatchList
-from olympiad.detect import BLUNDER, BRILLIANCY, Detector
+from olympiad.detect import Detector
 from olympiad.engine import Analyst, find_stockfish
 from olympiad.lichess import Lichess
 from olympiad.pgnfeed import parse_round_pgn, select_watched
@@ -35,13 +34,18 @@ from olympiad.state import State
 POLL_SECONDS = 150
 DEFAULT_MINUTES = 13
 
+# On first sight of a game, how far back to catch up. In normal running the
+# first poll of the day beats the clocks, so this only matters after a missed
+# run, where re-reading whole games would eat the engine budget.
+MAX_BACKFILL_PLIES = 40
+
 
 def log(message: str):
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
     print("[%s] %s" % (stamp, message), flush=True)
 
 
-def poll_once(lichess, watchlist, detector, slack, state, dry_run: bool) -> int:
+def poll_once(lichess, watchlist, detector, slack, state) -> int:
     """One sweep of every live group. Returns how many alerts were sent."""
     rounds = lichess.current_rounds()
     if not rounds:
@@ -65,10 +69,14 @@ def poll_once(lichess, watchlist, detector, slack, state, dry_run: bool) -> int:
             highest = game.moves[-1].ply if game.moves else 0
             if highest <= seen_to:
                 continue
-            for finding in detector.scan_game(game, from_ply=seen_to):
+            found, processed_to = detector.scan_game(game, from_ply=seen_to)
+            for finding in found:
                 if not state.already_alerted(finding.key):
                     new_findings.append(finding)
-            state.set_last_ply(rnd.id, game.game_id, highest)
+            # Record how far we actually got, not how far the game has gone.
+            # If the engine budget ran out mid-game, the rest is read next poll
+            # instead of being skipped for good.
+            state.set_last_ply(rnd.id, game.game_id, processed_to)
 
         log("%-22s %-9s %3d games, %2d watched, %d new"
             % (rnd.tour_name, rnd.name, len(games), len(watched), len(new_findings)))
@@ -112,12 +120,12 @@ def main() -> int:
 
     with Analyst(thresholds, stockfish) as analyst:
         detector = Detector(thresholds, analyst=analyst,
-                            alert_both_sides=args.both_sides)
+                            alert_both_sides=args.both_sides,
+                            max_backfill_plies=MAX_BACKFILL_PLIES)
         while True:
-            analyst.positions_analysed = 0
+            analyst.reset_budget()
             try:
-                total += poll_once(lichess, watchlist, detector, slack, state,
-                                   args.dry_run)
+                total += poll_once(lichess, watchlist, detector, slack, state)
             except Exception as exc:
                 # One bad poll must not end the run: the next one is 150
                 # seconds away and the tournament is still going.

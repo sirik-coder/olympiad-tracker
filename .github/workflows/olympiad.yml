@@ -92,6 +92,9 @@ jobs:
           # Never write this into a file or echo it. It is a password.
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SENSITIVITY: ${{ github.event.inputs.sensitivity || 'balanced' }}
+          # Player names and captions carry accents and dashes; without this
+          # the log mangles them and looks like a bug that is not there.
+          PYTHONIOENCODING: utf-8
         run: |
           python run.py \
             --minutes "${{ github.event.inputs.minutes || '13' }}" \

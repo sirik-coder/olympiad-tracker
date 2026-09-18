@@ -56,17 +56,35 @@ class Thresholds:
     blunder_now_at_most: float = 30.0     # to a clearly lost one
 
     # --- brilliancy ---
-    brilliancy_min_sacrifice: int = 90          # centipawns given up (SEE)
+    # At least a minor piece. Tried at 90 (about a pawn) against a real round
+    # and it returned two exchange sacrifices played from +5.7 and +5.9, which
+    # is a grandmaster converting a won game, not a brilliancy.
+    brilliancy_min_sacrifice: int = 280
     brilliancy_min_winning_chances: float = 55.0
     brilliancy_max_drop: float = 8.0
     brilliancy_min_only_move_gap: float = 20.0  # second best must be worse
+    # The game must still be undecided beforehand. A sacrifice played from a
+    # completely winning position is tidying up, whatever it looks like.
+    brilliancy_max_before: float = 75.0
 
     # --- engine ---
+    # Two speeds, because the engine does two different jobs.
+    #
+    # Confirming a brilliancy needs real depth: we are asking whether the
+    # second-best move is clearly worse, and a shallow search gets that wrong.
     engine_depth: int = 18
     engine_movetime_ms: int = 1500
+    max_engine_positions_per_poll: int = 40
+    #
+    # Filling a hole in the feed does not. It only has to be good enough to
+    # tell "still equal" from "now lost", and it may have to do that for a few
+    # hundred positions if the live feed is running without evaluations.
+    engine_screen_depth: int = 12
+    engine_screen_ms: int = 250
+    max_screen_positions_per_poll: int = 400
+
     engine_threads: int = 2
     engine_hash_mb: int = 256
-    max_engine_positions_per_poll: int = 40
 
     @classmethod
     def from_env(cls) -> "Thresholds":

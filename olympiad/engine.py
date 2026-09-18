@@ -129,7 +129,12 @@ class Analyst:
         self.thresholds = thresholds
         self.path = path or find_stockfish()
         self._engine = None
+        self.positions_analysed = 0   # deep searches, for confirming brilliancies
+        self.positions_screened = 0   # shallow searches, for filling feed gaps
+
+    def reset_budget(self):
         self.positions_analysed = 0
+        self.positions_screened = 0
 
     @property
     def available(self) -> bool:
@@ -157,21 +162,28 @@ class Analyst:
                 pass
             self._engine = None
 
-    def _limit(self) -> chess.engine.Limit:
-        return chess.engine.Limit(
-            depth=self.thresholds.engine_depth,
-            time=self.thresholds.engine_movetime_ms / 1000.0,
-        )
+    def _limit(self, deep: bool = True) -> chess.engine.Limit:
+        t = self.thresholds
+        if deep:
+            return chess.engine.Limit(depth=t.engine_depth,
+                                      time=t.engine_movetime_ms / 1000.0)
+        return chess.engine.Limit(depth=t.engine_screen_depth,
+                                  time=t.engine_screen_ms / 1000.0)
 
-    def top_moves(self, board: chess.Board, count: int = 2):
+    def top_moves(self, board: chess.Board, count: int = 2, deep: bool = True):
         """Best `count` moves, best first. None if the engine is unavailable."""
         if self._engine is None:
             return None
-        if self.positions_analysed >= self.thresholds.max_engine_positions_per_poll:
-            return None
-        self.positions_analysed += 1
+        if deep:
+            if self.positions_analysed >= self.thresholds.max_engine_positions_per_poll:
+                return None
+            self.positions_analysed += 1
+        else:
+            if self.positions_screened >= self.thresholds.max_screen_positions_per_poll:
+                return None
+            self.positions_screened += 1
         try:
-            infos = self._engine.analyse(board, self._limit(), multipv=count)
+            infos = self._engine.analyse(board, self._limit(deep), multipv=count)
         except Exception as exc:
             print("  ! engine error: %s" % exc)
             return None
@@ -193,6 +205,11 @@ class Analyst:
         return lines or None
 
     def evaluate(self, board: chess.Board):
-        """Evaluation of `board` from the side to move. None if unavailable."""
-        lines = self.top_moves(board, count=1)
+        """Evaluation of `board` from the side to move. None if unavailable.
+
+        Deliberately shallow. This runs only where the broadcast's own
+        evaluation is missing, and there may be hundreds of those in one poll
+        if the live feed is running without them.
+        """
+        lines = self.top_moves(board, count=1, deep=False)
         return lines[0].score if lines else None

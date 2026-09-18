@@ -126,7 +126,7 @@ def main() -> int:
             t.blunder_min_drop, t.blunder_was_at_least, t.blunder_now_at_most = (
                 drop, was, now)
             detector = Detector(t, analyst=None, alert_both_sides=args.both_sides)
-            count = sum(len(detector.scan_game(g)) for g in watched)
+            count = sum(len(detector.scan_game(g)[0]) for g in watched)
             print("  %-10s %-8d drop %.0f+, from %.0f%%+, to %.0f%% or worse"
                   % (name, count, drop, was, now))
         print("\n(Blunders only. Brilliancy detection needs the engine; "
@@ -141,6 +141,7 @@ def main() -> int:
     # A backtest is not racing a live round, so let the engine look at as many
     # candidate positions as the round throws up.
     thresholds.max_engine_positions_per_poll = 100000
+    thresholds.max_screen_positions_per_poll = 100000
 
     stockfish = None if args.no_engine else find_stockfish()
     if not args.no_engine and not stockfish:
@@ -152,7 +153,7 @@ def main() -> int:
                             alert_both_sides=args.both_sides)
         findings = []
         for game in watched:
-            findings += detector.scan_game(game)
+            findings += detector.scan_game(game)[0]
 
     findings.sort(key=lambda f: (f.kind != BRILLIANCY, -f.drop))
     blunders = [f for f in findings if f.kind == BLUNDER]

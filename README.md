@@ -148,9 +148,37 @@ to be true:
 4. Stockfish agrees it is the best move **and** the second-best move is clearly
    worse.
 
-Step 4 is why the project carries its own Stockfish. Lichess's broadcast gives
-one evaluation per move; to know whether anything else also won, you need the
-best move and the runner-up in the same position.
+Step 4 needs the best move *and* the runner-up in the same position, which no
+feed provides.
+
+---
+
+## Where the evaluations come from
+
+This one is worth knowing, because it is easy to assume the opposite.
+
+The broadcast PGN does carry Lichess's own Stockfish evaluation after almost
+every move — **but only once a game has finished**. While a game is being
+played, its moves arrive with clock times and nothing else. Checked against two
+other live broadcasts: every in-progress game had zero evaluations, every
+finished game had them on nearly every move.
+
+So:
+
+- **Live** (`run.py`): every number comes from our own Stockfish.
+- **Finished rounds** (`backtest.py`): the feed's evaluations are used, which is
+  why a backtest over a whole round takes about three minutes instead of an hour.
+
+Live analysis runs in three passes, to keep a poll inside its time slot:
+
+| Pass | Runs on | Depth | Why |
+|---|---|---|---|
+| screen | every new move | 12 | enough to tell "equal" from "lost", about 0.1s each |
+| verify | only flagged moves | 18 | shallow searches are noisy, and a false alert is worse than a missed one |
+| confirm | only sacrifice candidates | 18, top 2 moves | was it the *only* move |
+
+Positions are cached between passes, because the position after one move is the
+position before the next.
 
 ---
 

@@ -43,13 +43,32 @@ def _pick(options, seed: str):
     return options[int(digest[:8], 16) % len(options)]
 
 
-def _rating_phrase(rating: int) -> str:
+# Letters that are read starting with a vowel sound, so "an IM" but "a GM".
+_VOWEL_SOUND_LETTERS = set("AEFHILMNORSX")
+
+
+def _article(word: str) -> str:
+    if not word:
+        return "A"
+    return "An" if word[0].upper() in _VOWEL_SOUND_LETTERS else "A"
+
+
+def _rating_phrase(rating: int, title: str = "") -> str:
+    """How to refer to a player in one short phrase.
+
+    Rating first where it is impressive on its own, and the title otherwise.
+    Never round a player up: a 2424-rated IM is not "grandmaster-level", and
+    getting that wrong in public is exactly the kind of thing chess players
+    notice.
+    """
     if rating >= 2700:
         return "A 2700"
     if rating >= 2600:
         return "A 2600"
-    if rating >= 2400:
-        return "A grandmaster-level player"
+    if title:
+        return "%s %s" % (_article(title), title)
+    if rating:
+        return "A %d-rated player" % rating
     return "A titled player"
 
 
@@ -103,7 +122,7 @@ _BRILLIANCY = [
      "Moves like this don't come from inspiration. They come from having seen "
      "the pattern before — which is a thing you can actually train."),
 
-    ("{move}. A {material} sacrifice, on board {board}, at the Olympiad.\n"
+    ("{move}. A sacrifice of {material}, on board {board}, at the Olympiad.\n"
      "Every other move throws the position away. That's not calculation alone — "
      "that's knowing which positions are worth calculating."),
 
@@ -138,7 +157,7 @@ def draft_caption(finding) -> str:
     fields = {
         "name": player.short,
         "name_last": player.short.split()[-1] if player.short else "he",
-        "rating_phrase": _rating_phrase(player.rating),
+        "rating_phrase": _rating_phrase(player.rating, player.title),
         "rating": player.rating,
         "move": finding.move.san,
         "move_no": finding.move.move_number,

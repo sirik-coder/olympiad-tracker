@@ -168,7 +168,7 @@ def test_detection_finds_the_obvious_blunder():
     games = parse_round_pgn(SAMPLE_PGN, "Round 2", "Open | Matches 1-12")
     game = games[0]
     game.watch_reasons = {"white": "rated 2700"}
-    findings = Detector(Thresholds(), analyst=None).scan_game(game)
+    findings, _ = Detector(Thresholds(), analyst=None).scan_game(game)
     assert len(findings) == 1
     finding = findings[0]
     assert finding.kind == BLUNDER
@@ -184,8 +184,8 @@ def test_moves_already_seen_are_not_re_reported():
     game = games[0]
     game.watch_reasons = {"white": "rated 2700"}
     detector = Detector(Thresholds(), analyst=None)
-    assert detector.scan_game(game, from_ply=0)
-    assert not detector.scan_game(game, from_ply=3), "ply 3 was already read"
+    assert detector.scan_game(game, from_ply=0)[0]
+    assert not detector.scan_game(game, from_ply=3)[0], "ply 3 was already read"
 
 
 def test_we_stay_quiet_about_the_opponents_moves_by_default():
@@ -195,8 +195,8 @@ def test_we_stay_quiet_about_the_opponents_moves_by_default():
     games = parse_round_pgn(SAMPLE_PGN, "Round 2", "Open | Matches 1-12")
     game = games[0]
     game.watch_reasons = {"black": "rated 2500"}   # we watch Black, White blunders
-    assert not Detector(Thresholds(), analyst=None).scan_game(game)
-    assert Detector(Thresholds(), analyst=None, alert_both_sides=True).scan_game(game)
+    assert not Detector(Thresholds(), analyst=None).scan_game(game)[0]
+    assert Detector(Thresholds(), analyst=None, alert_both_sides=True).scan_game(game)[0]
 
 
 # --- captions --------------------------------------------------------------
@@ -216,6 +216,27 @@ def test_every_caption_template_stays_on_brand():
         assert not lint_caption(text), "off-brand words in: %s" % text[:60]
         assert 40 < len(text) < 420, "caption is the wrong length: %d" % len(text)
         assert text.count("\n") >= 1, "every caption is a hook plus a line or two"
+
+
+def test_players_are_never_rounded_up_to_a_title_they_do_not_have():
+    from olympiad.captions import _rating_phrase
+
+    assert _rating_phrase(2718, "GM") == "A 2700"
+    assert _rating_phrase(2630, "GM") == "A 2600"
+    # A 2424 IM is not "grandmaster-level", and chess players notice.
+    assert _rating_phrase(2424, "IM") == "An IM"
+    assert _rating_phrase(2374, "WGM") == "A WGM"
+    assert _rating_phrase(2100, "") == "A 2100-rated player"
+
+
+def test_a_brilliancy_must_be_a_real_sacrifice_in_a_live_game():
+    """Guards the two thresholds that a real round showed were too loose."""
+    from olympiad.config import Thresholds
+
+    t = Thresholds()
+    assert t.brilliancy_min_sacrifice >= 280, "an exchange sac is not a brilliancy"
+    assert t.brilliancy_max_before <= 80, \
+        "a sacrifice from a won position is conversion, not brilliance"
 
 
 def test_the_linter_actually_catches_things():
@@ -281,7 +302,7 @@ def test_the_slack_message_has_the_things_the_brief_asked_for():
     games = parse_round_pgn(SAMPLE_PGN, "Round 2", "Open | Matches 1-12")
     game = games[0]
     game.watch_reasons = {"white": "rated 2700"}
-    finding = Detector(Thresholds(), analyst=None).scan_game(game)[0]
+    finding = Detector(Thresholds(), analyst=None).scan_game(game)[0][0]
 
     payload = build_message(finding)
     blob = str(payload)
