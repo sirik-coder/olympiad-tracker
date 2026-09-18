@@ -45,15 +45,20 @@ SENSITIVITY_PRESETS = {
     "strict":   (35.0, 50.0, 22.0),
 }
 
+# What runs unless something says otherwise. Chosen after backtesting Round 2:
+# 'balanced' gave 3 alerts from that round's top group and 'loud' gave 4.
+DEFAULT_SENSITIVITY = "loud"
+
 
 @dataclass
 class Thresholds:
     """Rules for calling a move a blunder or a brilliancy."""
 
     # --- blunder ---
-    blunder_min_drop: float = 25.0        # winning chances must fall this far
-    blunder_was_at_least: float = 45.0    # from at least an equal position
-    blunder_now_at_most: float = 30.0     # to a clearly lost one
+    # These defaults are the 'loud' preset, which is what runs live.
+    blunder_min_drop: float = 20.0        # winning chances must fall this far
+    blunder_was_at_least: float = 40.0    # from at least an equal position
+    blunder_now_at_most: float = 35.0     # to a clearly lost one
 
     # --- brilliancy ---
     # At least a minor piece. Tried at 90 (about a pawn) against a real round
@@ -70,17 +75,26 @@ class Thresholds:
     # --- engine ---
     # Two speeds, because the engine does two different jobs.
     #
-    # Confirming a brilliancy needs real depth: we are asking whether the
-    # second-best move is clearly worse, and a shallow search gets that wrong.
+    # Both limits are set by DEPTH, with the millisecond figure only there as a
+    # safety net so one wild position cannot stall a poll. Capping on time
+    # instead makes the result depend on how busy the machine is, and it fails
+    # in the worst direction: a search cut short reports a position as calmer
+    # than it is, so blunders go missing. That is not theory - screening at
+    # depth 12 capped to 250ms read a real 0.84 -> -3.15 collapse as
+    # 0.76 -> -2.03, just inside the threshold, and the alert never fired.
+    # Depth 18 is the floor for the deciding search, not a round number. At 16
+    # a won endgame (Lichess: mate in 10 becoming mate in 9, so nothing at all
+    # happened) read as 93 -> 50 and produced a "threw away a win" alert that
+    # was simply wrong. Depth 18 sees it correctly at about 1.5s a position;
+    # depth 20 costs 4.8s and buys nothing here.
     engine_depth: int = 18
-    engine_movetime_ms: int = 1500
-    max_engine_positions_per_poll: int = 40
+    engine_movetime_ms: int = 6000
+    max_engine_positions_per_poll: int = 60
     #
-    # Filling a hole in the feed does not. It only has to be good enough to
-    # tell "still equal" from "now lost", and it may have to do that for a few
-    # hundred positions if the live feed is running without evaluations.
+    # The screen only has to tell "still equal" from "something happened", and
+    # it may have to do that for a few hundred positions in one poll.
     engine_screen_depth: int = 12
-    engine_screen_ms: int = 250
+    engine_screen_ms: int = 2000
     max_screen_positions_per_poll: int = 400
 
     engine_threads: int = 2
@@ -89,7 +103,7 @@ class Thresholds:
     @classmethod
     def from_env(cls) -> "Thresholds":
         t = cls()
-        preset = os.getenv("SENSITIVITY", "balanced").strip().lower()
+        preset = os.getenv("SENSITIVITY", DEFAULT_SENSITIVITY).strip().lower()
         if preset in SENSITIVITY_PRESETS:
             t.blunder_min_drop, t.blunder_was_at_least, t.blunder_now_at_most = (
                 SENSITIVITY_PRESETS[preset]

@@ -239,6 +239,60 @@ def test_a_brilliancy_must_be_a_real_sacrifice_in_a_live_game():
         "a sacrifice from a won position is conversion, not brilliance"
 
 
+def test_the_cheap_screen_is_looser_than_the_real_rule():
+    """The bug this guards against cost three real blunders.
+
+    The first pass runs a shallow search, which under load reports a position
+    as calmer than it is. Screening on the exact alert thresholds therefore
+    drops real blunders silently. A live 0.84 -> -3.15 collapse was screened
+    as 0.76 -> -2.03 and never looked at again.
+    """
+    from olympiad.config import SENSITIVITY_PRESETS, Thresholds
+    from olympiad.detect import Detector
+
+    # The exact numbers from the incident, under the preset that was running:
+    # the shallow pass read 57.0 -> 32.1 and the deep pass read 57.7 -> 23.9.
+    balanced = Thresholds()
+    (balanced.blunder_min_drop, balanced.blunder_was_at_least,
+     balanced.blunder_now_at_most) = SENSITIVITY_PRESETS["balanced"]
+    det = Detector(balanced, analyst=None)
+
+    assert det._blunder_subkind(57.0, 32.1) is None, \
+        "the real rule rejects the shallow reading, which is the whole problem"
+    assert det._blunder_candidate(57.0, 32.1), \
+        "so the screen must pass it through to the deep check anyway"
+    assert det._blunder_subkind(57.7, 23.9) == "threw_game", \
+        "and the deep reading of that same move is a blunder"
+
+    # The general property, on every preset: whatever the real rule accepts,
+    # the screen must accept too, or findings are lost before anyone looks.
+    for preset, (drop, was, now) in SENSITIVITY_PRESETS.items():
+        t = Thresholds()
+        t.blunder_min_drop, t.blunder_was_at_least, t.blunder_now_at_most = (
+            drop, was, now)
+        d = Detector(t, analyst=None)
+        for before in range(0, 101, 5):
+            for after in range(0, 101, 5):
+                if d._blunder_subkind(float(before), float(after)):
+                    assert d._blunder_candidate(float(before), float(after)), \
+                        "%s: screen drops %d -> %d" % (preset, before, after)
+
+    # A quiet move is still ignored by both.
+    assert not det._blunder_candidate(55.0, 52.0)
+
+
+def test_engine_limits_are_set_by_depth_not_by_a_tight_clock():
+    """A time-capped search gives different answers on a busy machine, and
+    fails towards silence. The millisecond values are a safety net only."""
+    from olympiad.config import Thresholds
+
+    t = Thresholds()
+    assert t.engine_screen_ms >= 1000, "too tight to reliably reach the depth"
+    assert t.engine_movetime_ms >= 3000
+    assert t.engine_screen_depth >= 12
+    assert t.engine_depth >= 18,         "depth 16 produced a false 'threw away a win' alert in a won endgame"
+
+
 def test_the_linter_actually_catches_things():
     assert "platform" in lint_caption("Our platform helps you improve")
     assert "centre" in lint_caption("Control the centre")

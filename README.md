@@ -113,6 +113,8 @@ The three settings:
 | `balanced` | drop 25+, from 45%+, down to 30% or worse                 |
 | `strict`   | drop 35+, from 50%+, down to 22% or worse                 |
 
+**`loud` is what runs live.**
+
 Change the setting for a live run in
 **Actions → Olympiad live tracker → Run workflow → sensitivity**.
 
@@ -173,12 +175,32 @@ Live analysis runs in three passes, to keep a poll inside its time slot:
 
 | Pass | Runs on | Depth | Why |
 |---|---|---|---|
-| screen | every new move | 12 | enough to tell "equal" from "lost", about 0.1s each |
-| verify | only flagged moves | 18 | shallow searches are noisy, and a false alert is worse than a missed one |
+| screen | every new move | 12 | enough to say "something happened here", about 0.1s each |
+| verify | only flagged moves | 18 | shallow searches are noisy, and a false alert costs more than a missed one |
 | confirm | only sacrifice candidates | 18, top 2 moves | was it the *only* move |
 
 Positions are cached between passes, because the position after one move is the
 position before the next.
+
+Two rules keep this honest, and both were learned the hard way when the first
+version of it found **none** of three known blunders in a test round:
+
+**The screen is deliberately loose.** It passes anything within 15 points of the
+alert threshold through to the deep check. A cheap filter that applies the real
+rule throws away real findings, because the shallow number it is judging is the
+unreliable one.
+
+**Depth 18 is a floor, not a round number.** At depth 16 a won endgame that
+Lichess reads as mate-in-10 becoming mate-in-9 — nothing happening at all —
+came out as 93 to 50 and produced a confident "threw away a win" alert that was
+simply wrong. Depth 18 sees it correctly, at about 1.5 seconds a position.
+
+**Search limits are set by depth, not by a tight clock.** A search capped at
+250ms returns whatever it reached, which depends on how busy the machine is —
+and it fails towards silence, reporting a position as calmer than it is. One
+real collapse from 0.84 to -3.15 was read as 0.76 to -2.03, landing just inside
+the threshold, and no alert fired. The millisecond figures in the config are a
+safety net so one wild position cannot stall a poll, not the actual limit.
 
 ---
 

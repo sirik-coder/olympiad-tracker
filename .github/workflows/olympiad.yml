@@ -45,7 +45,7 @@ on:
         description: 'How easily a move counts as a blunder'
         type: choice
         options: [loud, balanced, strict]
-        default: balanced
+        default: loud
 
 # One run at a time. If a run overruns its slot, the newer one wins, so a stuck
 # job cannot build up a queue behind it.
@@ -91,7 +91,7 @@ jobs:
         env:
           # Never write this into a file or echo it. It is a password.
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SENSITIVITY: ${{ github.event.inputs.sensitivity || 'balanced' }}
+          SENSITIVITY: ${{ github.event.inputs.sensitivity || 'loud' }}
           # Player names and captions carry accents and dashes; without this
           # the log mangles them and looks like a bug that is not there.
           PYTHONIOENCODING: utf-8

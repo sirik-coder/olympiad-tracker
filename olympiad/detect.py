@@ -205,6 +205,37 @@ class Detector:
 
     # -- rules --------------------------------------------------------------
 
+    # How much slack the cheap first pass allows, in winning-chance points. A
+    # shallow search is noisy in both directions, so the screen has to say
+    # "maybe" wherever the deep search might say "yes". Screening on the real
+    # thresholds silently loses blunders, because a search that stops early
+    # reports a position as calmer than it is.
+    SCREEN_SLACK = 15.0
+
+    def _blunder_candidate(self, before: float, after: float) -> bool:
+        """Loose version of the blunder rule, for the first pass only."""
+        t = self.thresholds
+        slack = self.SCREEN_SLACK
+        if before - after < t.blunder_min_drop - slack:
+            return False
+        if (before >= t.blunder_was_at_least - slack
+                and after <= t.blunder_now_at_most + slack):
+            return True
+        return before >= 80.0 - slack and after <= 55.0 + slack
+
+    def _sacrifice_candidate(self, move, before: float, after: float,
+                             slack: float = 0.0) -> bool:
+        """Did this move hand over real material and still leave a good game?"""
+        t = self.thresholds
+        if after < t.brilliancy_min_winning_chances - slack:
+            return False
+        if before - after > t.brilliancy_max_drop + slack:
+            return False
+        if before >= t.brilliancy_max_before + slack:
+            return False
+        return (material_swing(move.board_before, move.move)
+                <= -t.brilliancy_min_sacrifice)
+
     def _blunder_subkind(self, before: float, after: float):
         t = self.thresholds
         if before - after < t.blunder_min_drop:
@@ -254,7 +285,6 @@ class Detector:
         read, or they would be skipped forever and the blunder in them would
         never be seen.
         """
-        t = self.thresholds
         findings = []
         start = self._start_ply(game, from_ply)
         processed_to = start
@@ -277,29 +307,24 @@ class Detector:
                 break
             before, after, before_text, after_text = screened
 
-            subkind = self._blunder_subkind(before, after)
-            looks_sacrificial = (
-                after >= t.brilliancy_min_winning_chances
-                and before - after <= t.brilliancy_max_drop
-                and before < t.brilliancy_max_before
-                and material_swing(move.board_before, move.move)
-                <= -t.brilliancy_min_sacrifice
-            )
+            # First pass: is this worth a proper look? Deliberately generous.
+            if not (self._blunder_candidate(before, after)
+                    or self._sacrifice_candidate(move, before, after,
+                                                 slack=self.SCREEN_SLACK)):
+                processed_to = move.ply
+                continue
 
-            if subkind or looks_sacrificial:
-                # Shallow searches are noisy. Before anything reaches Slack,
-                # look again properly.
-                checked = self._resolve(move, deep=True)
-                if checked is not None:
-                    before, after, before_text, after_text = checked
-                    subkind = self._blunder_subkind(before, after)
-                    looks_sacrificial = (
-                        after >= t.brilliancy_min_winning_chances
-                        and before - after <= t.brilliancy_max_drop
-                        and before < t.brilliancy_max_before
-                        and material_swing(move.board_before, move.move)
-                        <= -t.brilliancy_min_sacrifice
-                    )
+            # Second pass: decide, at full depth. Nothing reaches Slack on the
+            # strength of a shallow search.
+            checked = self._resolve(move, deep=True)
+            if checked is None:
+                # Out of deep budget. Leave this move unread so the next poll
+                # picks it up, rather than judging it on the shallow numbers.
+                break
+            before, after, before_text, after_text = checked
+
+            subkind = self._blunder_subkind(before, after)
+            looks_sacrificial = self._sacrifice_candidate(move, before, after)
 
             processed_to = move.ply
 
