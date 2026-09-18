@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# WHO WE WATCH
+# Edit this file to change who gets tracked. Nothing else needs changing.
+# ---------------------------------------------------------------------------
+
+# Watch every game where at least one player is rated this or higher.
+# In the Open event: 2600 -> about 57 games per round. 2650 -> about 30.
+min_rating: 2600
+
+# The Women's event needs its own number. The highest rated woman playing is
+# 2536 (Assaubayeva), so a 2600 cutoff would mean the Women's Olympiad never
+# produces a single alert. 2400 -> about 21 games per round; 2450 -> about 9.
+min_rating_women: 2400
+
+# Always watch these people, whatever their rating.
+# fide_id is the safest way to name someone: it never changes, and it is not
+# affected by different spellings of the same name.
+always_watch_players:
+  - name: "Laohawirapap, Prin"
+    fide_id: 6205003
+    note: "Board 1 Thailand, first IM from Thailand, ChessMood student"
+
+# Always watch every board of these teams. Example: "Armenia"
+always_watch_teams: []
+
+# Never alert on these players even if the rules above match them.
+mute_players: []

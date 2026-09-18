@@ -1,0 +1,107 @@
+name: Olympiad live tracker
+
+# ---------------------------------------------------------------------------
+# WHEN THIS RUNS
+#
+# All times here are UTC, because that is the only clock GitHub understands.
+# Samarkand is UTC+5, so 10:15 UTC is the 15:15 local start.
+#
+# The real round times, read from the Lichess broadcast rather than assumed:
+#
+#   Round 1   Wed 16 Sep   10:15 UTC
+#   Round 2   Thu 17 Sep   10:15 UTC
+#   Round 3   Fri 18 Sep   10:15 UTC
+#   Round 4   Sat 19 Sep   10:15 UTC
+#   Round 5   Sun 20 Sep   10:15 UTC
+#   Round 6   Mon 21 Sep   10:15 UTC
+#   -------   Tue 22 Sep   rest day, nothing runs
+#   Round 7   Wed 23 Sep   10:15 UTC
+#   Round 8   Thu 24 Sep   10:15 UTC
+#   Round 9   Fri 25 Sep   10:15 UTC
+#   Round 10  Sat 26 Sep   10:15 UTC
+#   Round 11  Sun 27 Sep   06:15 UTC   <- four hours earlier than the rest
+#
+# A classical game here can last seven hours, so each window runs from just
+# before the round starts until the last game must be over.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Rounds 1-10: 10:00 to 17:59 UTC, every 15 minutes, skipping the rest day.
+    - cron: '0,15,30,45 10-17 16-21,23-26 9 *'
+    # Round 11 starts early: 06:00 to 13:59 UTC on 27 September.
+    - cron: '0,15,30,45 6-13 27 9 *'
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print alerts instead of sending them to Slack'
+        type: boolean
+        default: false
+      minutes:
+        description: 'How long this run should keep polling'
+        default: '13'
+      sensitivity:
+        description: 'How easily a move counts as a blunder'
+        type: choice
+        options: [loud, balanced, strict]
+        default: balanced
+
+# One run at a time. If a run overruns its slot, the newer one wins, so a stuck
+# job cannot build up a queue behind it.
+concurrency:
+  group: olympiad-tracker
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+
+      - name: Install Stockfish
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq stockfish
+          stockfish_path=$(command -v stockfish || echo /usr/games/stockfish)
+          echo "STOCKFISH_PATH=$stockfish_path" >> "$GITHUB_ENV"
+          echo "Using $stockfish_path"
+
+      # The memory of which moves we have already alerted on. Without this,
+      # every run would start from move one and repost everything.
+      - name: Restore what we have already seen
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: olympiad-state-${{ github.run_id }}
+          restore-keys: |
+            olympiad-state-
+
+      - name: Watch the games
+        env:
+          # Never write this into a file or echo it. It is a password.
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SENSITIVITY: ${{ github.event.inputs.sensitivity || 'balanced' }}
+        run: |
+          python run.py \
+            --minutes "${{ github.event.inputs.minutes || '13' }}" \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      # Runs even if the step above failed, so a crash halfway through a round
+      # does not make the next run repost everything it already sent.
+      - name: Save what we have seen
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: olympiad-state-${{ github.run_id }}-${{ github.run_attempt }}
