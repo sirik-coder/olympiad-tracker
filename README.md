@@ -8,9 +8,11 @@ voice.
 
 ## What it does, in order
 
-1. Every 15 minutes during a round, GitHub Actions starts a run.
-2. The run asks Lichess which round each of the nine Olympiad broadcast groups
-   is playing right now.
+1. GitHub Actions starts a run at 10:00 UTC and another at 15:35, together
+   covering the round. Each one keeps polling every three and a half minutes
+   for as long as it lasts.
+2. Each poll asks Lichess which round each of the nine Olympiad broadcast
+   groups is playing right now.
 3. It downloads each group's games as PGN and keeps only the ones with a player
    we watch.
 4. For every new move, it compares the position before and after and decides
