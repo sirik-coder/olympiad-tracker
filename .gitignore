@@ -7,3 +7,7 @@ state/*.json
 out/
 *.pgn
 .env
+# Safety net: if the Slack webhook is ever dropped into the project folder on
+# the way to becoming a GitHub secret, it must not be committable.
+webhook.txt
+*webhook*
