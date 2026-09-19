@@ -101,8 +101,46 @@ def poll_once(lichess, watchlist, detector, slack, state) -> int:
     return alerts
 
 
+def replay_round(round_name: str, lichess, watchlist, detector, slack) -> int:
+    """Post a finished round's findings to Slack, to show what alerts look like.
+
+    Deliberately does not touch the state file. A replay is a demonstration,
+    not a record: it must not mark anything as already alerted, and it must not
+    move the marker for a round that is still being played.
+    """
+    rounds = lichess.round_by_name(round_name)
+    if not rounds:
+        log("no round called %r was found" % round_name)
+        return 1
+
+    findings = []
+    for rnd in rounds:
+        games = parse_round_pgn(lichess.round_pgn(rnd.id), rnd.name, rnd.tour_name)
+        watched = select_watched(games, watchlist)
+        for game in watched:
+            found, _ = detector.scan_game(game)
+            findings += found
+        log("%-24s %3d games, %2d watched" % (rnd.tour_name, len(games), len(watched)))
+
+    findings.sort(key=lambda f: (f.game.tour_name, f.game.board, f.move.ply))
+    log("replaying %d findings from %s" % (len(findings), round_name))
+
+    slack.post_text(
+        ":rewind: *Replay of %s* - this round is already finished. "
+        "These are the alerts the tracker would have posted while it was being "
+        "played, shown so you can see the format before a live round."
+        % round_name)
+    for finding in findings:
+        slack.post(finding)
+    slack.post_text(":white_check_mark: End of %s replay. Live alerts follow "
+                    "automatically during the next round." % round_name)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--replay", default="",
+                        help='post a finished round to Slack, e.g. "Round 3"')
     parser.add_argument("--once", action="store_true", help="one poll, then exit")
     parser.add_argument("--minutes", type=float, default=DEFAULT_MINUTES,
                         help="how long to keep polling (default %d)" % DEFAULT_MINUTES)
@@ -131,6 +169,14 @@ def main() -> int:
         log("! named SLACK_WEBHOOK_URL.")
         log("!" * 66)
     log("state: %s" % state.summary())
+
+    if args.replay:
+        with Analyst(thresholds, stockfish) as analyst:
+            # No backfill limit: a replay reads the whole game, not just the
+            # part that arrived since the last poll.
+            detector = Detector(thresholds, analyst=analyst,
+                                alert_both_sides=args.both_sides)
+            return replay_round(args.replay, lichess, watchlist, detector, slack)
 
     deadline = time.time() + args.minutes * 60
     total = 0

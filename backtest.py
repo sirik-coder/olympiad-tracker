@@ -19,7 +19,8 @@ import sys
 import time
 
 from olympiad.captions import draft_caption, lint_caption
-from olympiad.config import SENSITIVITY_PRESETS, Thresholds, WatchList
+from olympiad.config import (
+    DEFAULT_SENSITIVITY, SENSITIVITY_PRESETS, Thresholds, WatchList)
 from olympiad.detect import BLUNDER, BRILLIANCY, Detector
 from olympiad.engine import Analyst, find_stockfish
 from olympiad.lichess import Lichess
@@ -90,7 +91,9 @@ def show(finding, index: int):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--round", default="Round 2", help='e.g. "Round 2"')
-    parser.add_argument("--sensitivity", default="balanced",
+    # Defaults to whatever the live job uses, so a preview is a preview of
+    # the real thing rather than of a setting nobody runs.
+    parser.add_argument("--sensitivity", default=DEFAULT_SENSITIVITY,
                         choices=sorted(SENSITIVITY_PRESETS))
     parser.add_argument("--group", default="", help='filter, e.g. "Open" or "Women"')
     parser.add_argument("--compare", action="store_true",

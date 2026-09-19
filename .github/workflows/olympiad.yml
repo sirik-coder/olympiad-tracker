@@ -52,6 +52,9 @@ on:
         description: 'Print alerts instead of sending them to Slack'
         type: boolean
         default: false
+      replay:
+        description: 'Post a finished round to Slack instead of watching live, e.g. Round 3'
+        default: ''
       minutes:
         description: 'How long this run should keep polling'
         default: '20'
@@ -123,6 +126,13 @@ jobs:
               # The afternoon watcher, through to the end of the longest games.
               *) minutes=165 ;;
             esac
+          fi
+          replay="${{ github.event.inputs.replay }}"
+          if [ -n "$replay" ]; then
+            echo "Replaying $replay into Slack."
+            python run.py --replay "$replay" \
+              ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+            exit $?
           fi
           echo "Polling for $minutes minutes."
           python run.py \
