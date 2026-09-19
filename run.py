@@ -31,8 +31,12 @@ from olympiad.pgnfeed import parse_round_pgn, select_watched
 from olympiad.slack import Slack
 from olympiad.state import State
 
-POLL_SECONDS = 150
-DEFAULT_MINUTES = 13
+# Measured on the first live round: one sweep of all nine groups takes about
+# 80 seconds, so this is the gap on top of that, not the cycle time. 90 gives a
+# cycle of roughly three and a half minutes, inside the "every few minutes"
+# this is meant to deliver, without hammering Lichess.
+POLL_SECONDS = 90
+DEFAULT_MINUTES = 20
 
 # On first sight of a game, how far back to catch up. In normal running the
 # first poll of the day beats the clocks, so this only matters after a missed
@@ -83,8 +87,14 @@ def poll_once(lichess, watchlist, detector, slack, state) -> int:
 
         # Oldest moment first, so the channel reads in the order things happened.
         for finding in sorted(new_findings, key=lambda f: f.move.ply):
-            if slack.post(finding):
+            posted = slack.post(finding)
+            # Only write it off as delivered if it really was. A dry run must
+            # not use up an alert: on the first live round the webhook was not
+            # set yet, and seven real findings were quietly marked as sent and
+            # could never be posted again.
+            if posted and not slack.dry_run:
                 state.mark_alerted(finding.key)
+            if posted:
                 alerts += 1
 
     state.save()
@@ -113,6 +123,13 @@ def main() -> int:
         % (watchlist.min_rating, len(watchlist.player_fide_ids), len(watchlist.teams)))
     log("stockfish: %s" % (stockfish or "NOT FOUND - brilliancy detection is off"))
     log("slack: %s" % ("dry run" if slack.dry_run else "live webhook"))
+    if slack.dry_run and not args.dry_run:
+        log("!" * 66)
+        log("! SLACK_WEBHOOK_URL is not set, so nothing will be posted.")
+        log("! Findings below are printed to this log only. To fix: repository")
+        log("! Settings > Secrets and variables > Actions > New repository secret,")
+        log("! named SLACK_WEBHOOK_URL.")
+        log("!" * 66)
     log("state: %s" % state.summary())
 
     deadline = time.time() + args.minutes * 60

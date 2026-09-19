@@ -218,13 +218,24 @@ A cron job cannot use it: the job wakes up, looks, and exits, and cannot hold a
 connection open in between. The plain snapshot endpoint already contains
 whatever the stream would have pushed while we were asleep, so nothing is lost.
 
-## Why one run polls several times
+## Why there are two long runs a day, not many short ones
 
-GitHub will not schedule a job more often than every five minutes, and under
-load it often starts one ten or twenty minutes late. A run that looked once
-would turn "every 15 minutes" into "sometime within the half hour". Instead each
-run polls every 150 seconds for about 13 minutes, so a late start costs a little
-overlap rather than a gap.
+This was built as a run every fifteen minutes, each polling for thirteen. Then
+the first live round happened.
+
+On 18 September, GitHub delivered **three of the thirty-two scheduled runs**,
+and started one of those at 19:56 UTC — two hours after the window had closed.
+Eight hours of chess got about forty minutes of watching.
+
+GitHub does not promise to start a scheduled job on time and silently drops
+them under load, and asking more often makes it worse, not better. So the
+cadence now comes from inside the job: a morning run polls for five and a half
+hours, and an afternoon run takes over for the rest. Two rather than one only
+because a single job may not exceed six hours.
+
+Within a run, each sweep of the nine groups takes about 80 seconds and there is
+a 90 second gap after it, so a game is looked at roughly every three and a half
+minutes.
 
 ---
 

@@ -25,12 +25,26 @@ name: Olympiad live tracker
 # before the round starts until the last game must be over.
 # ---------------------------------------------------------------------------
 
+# TWO LONG RUNS A DAY, NOT THIRTY-TWO SHORT ONES
+#
+# This started as a run every fifteen minutes, each polling for thirteen. On
+# the first live round, 18 September, GitHub delivered three of the thirty-two
+# scheduled runs, and started one of those at 19:56 UTC - two hours after the
+# window had closed. Eight hours of chess got about forty minutes of watching.
+#
+# GitHub does not promise to run a scheduled job on time, and drops them
+# outright under load. The fewer we ask for, the better the odds each one
+# arrives, so the cadence now comes from inside the job: one run starts in the
+# morning and polls for five and a half hours, and a second takes over for the
+# rest. A job may not exceed six hours, which is the only reason it is two.
 on:
   schedule:
-    # Rounds 1-10: 10:00 to 17:59 UTC, every 15 minutes, skipping the rest day.
-    - cron: '0,15,30,45 10-17 16-21,23-26 9 *'
-    # Round 11 starts early: 06:00 to 13:59 UTC on 27 September.
-    - cron: '0,15,30,45 6-13 27 9 *'
+    # Rounds 1-10. Morning watcher, then the afternoon one. Rest day skipped.
+    - cron: '0 10 16-21,23-26 9 *'
+    - cron: '35 15 16-21,23-26 9 *'
+    # Round 11 on 27 September starts four hours earlier than the rest.
+    - cron: '0 6 27 9 *'
+    - cron: '35 11 27 9 *'
 
   workflow_dispatch:
     inputs:
@@ -40,23 +54,27 @@ on:
         default: false
       minutes:
         description: 'How long this run should keep polling'
-        default: '13'
+        default: '20'
       sensitivity:
         description: 'How easily a move counts as a blunder'
         type: choice
         options: [loud, balanced, strict]
         default: loud
 
-# One run at a time. If a run overruns its slot, the newer one wins, so a stuck
-# job cannot build up a queue behind it.
+# One run at a time, and never cancel the one already going. Cancelling would
+# kill it before it uploads its record of what has already been alerted, and
+# the next run would restore a stale record and post the same moments twice.
+# A late run waits its turn instead.
 concurrency:
   group: olympiad-tracker
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # GitHub's own ceiling is six hours. Stay under it so the job ends on its
+    # own terms and gets to save its state.
+    timeout-minutes: 350
 
     steps:
       - uses: actions/checkout@v4
@@ -96,8 +114,19 @@ jobs:
           # the log mangles them and looks like a bug that is not there.
           PYTHONIOENCODING: utf-8
         run: |
+          minutes="${{ github.event.inputs.minutes }}"
+          if [ -z "$minutes" ]; then
+            case "${{ github.event.schedule }}" in
+              # The morning watcher: 10:00 -> 15:30, or 06:00 -> 11:30 on the
+              # last day. Stops before the afternoon one is due.
+              "0 10 "*|"0 6 "*) minutes=330 ;;
+              # The afternoon watcher, through to the end of the longest games.
+              *) minutes=165 ;;
+            esac
+          fi
+          echo "Polling for $minutes minutes."
           python run.py \
-            --minutes "${{ github.event.inputs.minutes || '13' }}" \
+            --minutes "$minutes" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       # Runs even if the step above failed, so a crash halfway through a round
