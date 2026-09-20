@@ -220,24 +220,36 @@ A cron job cannot use it: the job wakes up, looks, and exits, and cannot hold a
 connection open in between. The plain snapshot endpoint already contains
 whatever the stream would have pushed while we were asleep, so nothing is lost.
 
-## Why there are two long runs a day, not many short ones
+## Scheduling, and two rounds' worth of getting it wrong
 
-This was built as a run every fifteen minutes, each polling for thirteen. Then
-the first live round happened.
+GitHub does not start scheduled jobs when it says it will. Two designs failed
+on live rounds before this one.
 
-On 18 September, GitHub delivered **three of the thirty-two scheduled runs**,
-and started one of those at 19:56 UTC — two hours after the window had closed.
-Eight hours of chess got about forty minutes of watching.
+**Every fifteen minutes, polling for thirteen.** On 18 September GitHub
+delivered three of the thirty-two runs, and started one at 19:56 UTC, two hours
+after the window closed. Eight hours of chess got forty minutes of watching.
 
-GitHub does not promise to start a scheduled job on time and silently drops
-them under load, and asking more often makes it worse, not better. So the
-cadence now comes from inside the job: a morning run polls for five and a half
-hours, and an afternoon run takes over for the rest. Two rather than one only
-because a single job may not exceed six hours.
+**Two long runs a day.** On 19 September the 10:00 run started at **13:45** —
+three and three quarter hours late. The 15:35 run then queued behind it, started
+at 19:15 once it finished, and watched an empty board for 165 minutes. Every
+alert that round came from one section, because the other sections' decisive
+moments had happened during the unwatched hours.
 
-Within a run, each sweep of the nine groups takes about 80 seconds and there is
-a 90 second gap after it, so a game is looked at roughly every three and a half
+**What runs now:** an attempt every hour through the round, each polling until a
+fixed wall-clock time rather than for a fixed length. Whichever run actually
+gets a machine covers the rest of the day; the ones queued behind it wake up
+past the end time and exit in seconds. The hourly crons also hand over when a
+run hits GitHub's six-hour ceiling.
+
+Within a run, each sweep of the nine groups takes about 80 seconds with a 90
+second gap after it, so a game is looked at roughly every three and a half
 minutes.
+
+**A late start now catches up the whole round.** There used to be a 40 half-move
+limit on how far back a game was read when first seen, meant to protect the
+engine budget on a cold start. Combined with a 3h45m late start it meant the
+first half of every game was never analysed - not found clean, never looked at.
+The limit is gone and the engine budget raised to match.
 
 ---
 

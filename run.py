@@ -38,10 +38,23 @@ from olympiad.state import State
 POLL_SECONDS = 90
 DEFAULT_MINUTES = 20
 
-# On first sight of a game, how far back to catch up. In normal running the
-# first poll of the day beats the clocks, so this only matters after a missed
-# run, where re-reading whole games would eat the engine budget.
-MAX_BACKFILL_PLIES = 40
+# On first sight of a game, how far back to read. Zero means the whole game.
+#
+# This was 40 half-moves, to stop a cold start eating the engine budget. On
+# Round 4 that turned out to be the wrong trade. GitHub started the morning run
+# three hours and forty-five minutes late, by which point the top boards were
+# fifty moves deep, and the limit meant the first three hours of every game
+# were not analysed - not found clean, never looked at. Every alert that round
+# came from the one section whose decisive moments happened to fall inside the
+# last forty half-moves.
+#
+# Reading the whole game costs one slow poll at the start of a late run and
+# nothing thereafter, because the state file remembers where it got to.
+MAX_BACKFILL_PLIES = 0
+
+# How many polls in a row may find no live round before the run gives up. A
+# run that starts after the round has finished should not sit there for hours.
+EMPTY_POLLS_BEFORE_GIVING_UP = 3
 
 
 def log(message: str):
@@ -49,12 +62,27 @@ def log(message: str):
     print("[%s] %s" % (stamp, message), flush=True)
 
 
+def _utc_time_today(hhmm: str):
+    """Turn "18:30" into a unix timestamp for that time today, UTC.
+
+    Returns None if it cannot be read, so a typo in the workflow degrades to
+    "run for the full length" rather than crashing the round.
+    """
+    try:
+        hours, minutes = (int(part) for part in hhmm.strip().split(":"))
+    except (ValueError, TypeError):
+        return None
+    now = dt.datetime.now(dt.timezone.utc)
+    target = now.replace(hour=hours, minute=minutes, second=0, microsecond=0)
+    return target.timestamp()
+
+
 def poll_once(lichess, watchlist, detector, slack, state) -> int:
     """One sweep of every live group. Returns how many alerts were sent."""
     rounds = lichess.current_rounds()
     if not rounds:
         log("no round is live right now")
-        return 0
+        return None   # distinct from 0 alerts: there was nothing to look at
 
     alerts = 0
     for rnd in rounds:
@@ -143,7 +171,12 @@ def main() -> int:
                         help='post a finished round to Slack, e.g. "Round 3"')
     parser.add_argument("--once", action="store_true", help="one poll, then exit")
     parser.add_argument("--minutes", type=float, default=DEFAULT_MINUTES,
-                        help="how long to keep polling (default %d)" % DEFAULT_MINUTES)
+                        help="longest this run may poll for (default %d)"
+                             % DEFAULT_MINUTES)
+    parser.add_argument("--until", default="",
+                        help="stop at this UTC time, e.g. 18:30. A run that "
+                             "starts late must still stop when the round ends, "
+                             "not run on for its full length into the night.")
     parser.add_argument("--dry-run", action="store_true",
                         help="print alerts instead of sending them")
     parser.add_argument("--both-sides", action="store_true",
@@ -179,7 +212,23 @@ def main() -> int:
             return replay_round(args.replay, lichess, watchlist, detector, slack)
 
     deadline = time.time() + args.minutes * 60
+    if args.until:
+        until_ts = _utc_time_today(args.until)
+        if until_ts is None:
+            log("could not read --until %r, ignoring it" % args.until)
+        else:
+            deadline = min(deadline, until_ts)
+            if deadline <= time.time():
+                # Queued behind an earlier run and only now got a machine, by
+                # which point the round is over. Stop rather than watch nothing.
+                log("it is past %s UTC, so this round is done. Nothing to do."
+                    % args.until)
+                return 0
+            log("polling until %s UTC (%.0f minutes)"
+                % (args.until, (deadline - time.time()) / 60.0))
+
     total = 0
+    empty_polls = 0
 
     with Analyst(thresholds, stockfish) as analyst:
         detector = Detector(thresholds, analyst=analyst,
@@ -188,12 +237,21 @@ def main() -> int:
         while True:
             analyst.reset_budget()
             try:
-                total += poll_once(lichess, watchlist, detector, slack, state)
+                sent = poll_once(lichess, watchlist, detector, slack, state)
+                if sent is None:
+                    empty_polls += 1
+                else:
+                    empty_polls = 0
+                    total += sent
             except Exception as exc:
-                # One bad poll must not end the run: the next one is 150
-                # seconds away and the tournament is still going.
+                # One bad poll must not end the run: the next one is a couple
+                # of minutes away and the tournament is still going.
                 log("poll failed: %s: %s" % (type(exc).__name__, exc))
 
+            if empty_polls >= EMPTY_POLLS_BEFORE_GIVING_UP:
+                log("no round has been live for %d polls; stopping early"
+                    % empty_polls)
+                break
             if args.once or time.time() + POLL_SECONDS > deadline:
                 break
             time.sleep(POLL_SECONDS)

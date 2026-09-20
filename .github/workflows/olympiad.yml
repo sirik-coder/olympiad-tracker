@@ -25,26 +25,31 @@ name: Olympiad live tracker
 # before the round starts until the last game must be over.
 # ---------------------------------------------------------------------------
 
-# TWO LONG RUNS A DAY, NOT THIRTY-TWO SHORT ONES
+# HOURLY ATTEMPTS, EACH RUNNING UNTIL THE ROUND ENDS
 #
-# This started as a run every fifteen minutes, each polling for thirteen. On
-# the first live round, 18 September, GitHub delivered three of the thirty-two
-# scheduled runs, and started one of those at 19:56 UTC - two hours after the
-# window had closed. Eight hours of chess got about forty minutes of watching.
+# Two earlier designs failed on live rounds, both because GitHub does not start
+# scheduled jobs when it says it will.
 #
-# GitHub does not promise to run a scheduled job on time, and drops them
-# outright under load. The fewer we ask for, the better the odds each one
-# arrives, so the cadence now comes from inside the job: one run starts in the
-# morning and polls for five and a half hours, and a second takes over for the
-# rest. A job may not exceed six hours, which is the only reason it is two.
+# Every fifteen minutes, polling for thirteen: on 18 September GitHub delivered
+# three of thirty-two runs and started one two hours after the window shut.
+#
+# Two long runs a day: on 19 September the 10:00 run started at 13:45, three
+# and three quarter hours late, missing the first half of Round 4. The 15:35
+# run then queued behind it and started at 19:15, after the round had finished,
+# and watched an empty board for 165 minutes.
+#
+# So: ask hourly, and let whichever run actually gets a machine cover the rest
+# of the day. Each one polls until a fixed wall-clock time rather than for a
+# fixed length, so a late start still stops when the chess does. Runs that are
+# queued behind it wake up past that time and exit in seconds. A job may not
+# exceed six hours, so the hourly crons also provide the handover when a run
+# hits that ceiling.
 on:
   schedule:
-    # Rounds 1-10. Morning watcher, then the afternoon one. Rest day skipped.
-    - cron: '0 10 16-21,23-26 9 *'
-    - cron: '35 15 16-21,23-26 9 *'
+    # Rounds 1-10, hourly through the round. Rest day (22 Sep) skipped.
+    - cron: '0 10-16 16-21,23-26 9 *'
     # Round 11 on 27 September starts four hours earlier than the rest.
-    - cron: '0 6 27 9 *'
-    - cron: '35 11 27 9 *'
+    - cron: '0 6-12 27 9 *'
 
   workflow_dispatch:
     inputs:
@@ -54,6 +59,9 @@ on:
         default: false
       replay:
         description: 'Post a finished round to Slack instead of watching live, e.g. Round 3'
+        default: ''
+      until:
+        description: 'Stop polling at this UTC time (default 18:30)'
         default: ''
       minutes:
         description: 'How long this run should keep polling'
@@ -117,16 +125,19 @@ jobs:
           # the log mangles them and looks like a bug that is not there.
           PYTHONIOENCODING: utf-8
         run: |
+          # Longest a single job may poll for. GitHub's own ceiling is six
+          # hours; stop short of it so the job ends on its own terms and gets
+          # to save what it has already alerted on.
           minutes="${{ github.event.inputs.minutes }}"
-          if [ -z "$minutes" ]; then
-            case "${{ github.event.schedule }}" in
-              # The morning watcher: 10:00 -> 15:30, or 06:00 -> 11:30 on the
-              # last day. Stops before the afternoon one is due.
-              "0 10 "*|"0 6 "*) minutes=330 ;;
-              # The afternoon watcher, through to the end of the longest games.
-              *) minutes=165 ;;
-            esac
-          fi
+          [ -z "$minutes" ] && minutes=330
+
+          # When the chess is over. Rounds start 10:15 UTC and the longest
+          # games run about seven hours; round 11 on the 27th starts at 06:15.
+          until_utc=18:30
+          case "${{ github.event.schedule }}" in
+            "0 6-12 27 9 *") until_utc=14:30 ;;
+          esac
+          [ -n "${{ github.event.inputs.until }}" ] && until_utc="${{ github.event.inputs.until }}"
           replay="${{ github.event.inputs.replay }}"
           if [ -n "$replay" ]; then
             echo "Replaying $replay into Slack."
@@ -134,9 +145,10 @@ jobs:
               ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
             exit $?
           fi
-          echo "Polling for $minutes minutes."
+          echo "Polling until $until_utc UTC, at most $minutes minutes."
           python run.py \
             --minutes "$minutes" \
+            --until "$until_utc" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       # Runs even if the step above failed, so a crash halfway through a round

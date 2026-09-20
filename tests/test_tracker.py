@@ -68,10 +68,36 @@ def test_bishop_for_a_pawn_reads_as_a_sacrifice():
     assert swing < -200, "Bxf7+ should read as giving up roughly a bishop for a pawn"
 
 
-def test_winning_a_free_pawn_is_not_a_sacrifice():
+def test_a_capture_that_gets_answered_nets_out_to_nothing():
+    """After 1.e4 e5 2.Nf3 Nf6 3.Nxe5, Black replies Nxe4 and wins the pawn
+    back. The net is zero, not plus a pawn, and certainly not a sacrifice."""
     board = chess.Board(
         "rnbqkb1r/pppp1ppp/5n2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3")
-    assert material_swing(board, chess.Move.from_uci("f3e5")) > 0
+    assert material_swing(board, chess.Move.from_uci("f3e5")) == 0
+
+
+def test_an_ordinary_trade_is_not_a_nine_pawn_sacrifice():
+    """The bug this guards against flagged 73 routine recaptures across two
+    rounds as brilliancies. Measuring what the opponent can win back, without
+    also counting what the move just took, makes every trade look like a gift.
+    """
+    board = chess.Board("r2qk2r/ppp2ppp/2n5/3Q4/8/8/PPP2PPP/R3K2R w KQkq - 0 1")
+    assert material_swing(board, chess.Move.from_uci("d5d8")) == 0
+
+
+def test_a_sacrifice_away_from_the_landing_square_is_still_seen():
+    """A move can give material away somewhere other than where it lands.
+
+    Here White plays Rd1-d7 to attack on the seventh rank and simply leaves the
+    undefended bishop on a3 to the rook on a8. Judging only the square moved to
+    calls this free; it is a bishop. That blindness found 5 candidates across
+    two rounds where there should have been dozens.
+    """
+    board = chess.Board("r5k1/1p3ppp/8/8/8/B7/P4PPP/3R2K1 w - - 0 1")
+    move = chess.Move.from_uci("d1d7")
+    assert material_swing(board, move) == -330, "the bishop is being given away"
+    assert material_swing(board, move, anywhere=False) == 0, \
+        "and this is exactly what the old, narrower test missed"
 
 
 def test_a_defended_square_is_not_a_free_capture():

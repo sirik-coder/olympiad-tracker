@@ -92,16 +92,51 @@ def _best_capture_gain(board: chess.Board, square: int, depth: int = 0) -> int:
     return best
 
 
-def material_swing(board: chess.Board, move: chess.Move) -> int:
-    """Centipawns the mover nets from `move`, assuming best play on that square.
+def best_material_grab(board: chess.Board) -> int:
+    """Most material the side to move can win by force, anywhere on the board.
 
-    Negative means material was given up. A knight dropped on an empty defended
-    square scores about -320; taking a free pawn scores +100.
+    This is the general form of the sacrifice test. Looking only at the square
+    a piece moves to misses most real sacrifices: a queen offered on one square
+    and taken on another, a rook left hanging while the attack goes elsewhere,
+    an exchange sacrifice that is only accepted two moves later. Asking instead
+    "after this move, what can the opponent simply win?" catches all of them.
+    """
+    best = 0
+    for move in board.legal_moves:
+        if not board.is_capture(move):
+            continue
+        gain = _captured_value(board, move) + _promotion_bonus(move)
+        board.push(move)
+        gain -= _best_capture_gain(board, move.to_square)
+        board.pop()
+        if gain > best:
+            best = gain
+    return best
+
+
+def material_swing(board: chess.Board, move: chess.Move, anywhere: bool = True) -> int:
+    """Centipawns the mover nets from `move`. Negative means material given up.
+
+    Both halves matter, and getting one of them wrong is easy.
+
+    What the move *wins* has to be counted, or every ordinary capture looks
+    like a sacrifice: Qxd8 answered by Rxd8 hands the opponent a queen, but it
+    also took one, so the net is nothing. Measuring only what the opponent can
+    grab flagged 73 routine recaptures in two rounds as brilliancies.
+
+    What the move *loses* has to be counted across the whole board, not just
+    the square landed on, or most real sacrifices are invisible: a queen
+    offered on one square and taken on another, a rook left hanging while the
+    attack goes elsewhere. That mistake found 5 candidates in two rounds where
+    there should have been dozens.
     """
     gain = _captured_value(board, move) + _promotion_bonus(move)
     after = board.copy(stack=False)
     after.push(move)
-    gain -= _best_capture_gain(after, move.to_square)
+    if anywhere:
+        gain -= best_material_grab(after)
+    else:
+        gain -= _best_capture_gain(after, move.to_square)
     return gain
 
 

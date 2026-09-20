@@ -106,7 +106,13 @@ class Thresholds:
     # it may have to do that for a few hundred positions in one poll.
     engine_screen_depth: int = 12
     engine_screen_ms: int = 2000
-    max_screen_positions_per_poll: int = 400
+    # Generous, because the poll that matters most is the first one of a run
+    # that started late: it may have several hours of chess to catch up on, and
+    # anything it cannot reach is a blunder nobody will ever be told about. A
+    # normal poll only sees a hundred or so new half-moves and never comes
+    # close to this. At roughly 0.06s each, 2500 is about two and a half
+    # minutes of work in the worst case.
+    max_screen_positions_per_poll: int = 2500
 
     engine_threads: int = 2
     engine_hash_mb: int = 256
