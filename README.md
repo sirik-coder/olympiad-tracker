@@ -8,9 +8,9 @@ voice.
 
 ## What it does, in order
 
-1. GitHub Actions starts a run at 10:00 UTC and another at 15:35, together
-   covering the round. Each one keeps polling every three and a half minutes
-   for as long as it lasts.
+1. GitHub Actions tries to start a run every hour through the round. Whichever
+   one actually gets a machine polls every three and a half minutes until the
+   round is over; the rest exit in seconds.
 2. Each poll asks Lichess which round each of the nine Olympiad broadcast
    groups is playing right now.
 3. It downloads each group's games as PGN and keeps only the ones with a player
@@ -145,8 +145,12 @@ Harder, and it needs the engine. A brilliancy is not just a sacrifice that
 worked; it is a sacrifice that was the *only* thing that worked. All four have
 to be true:
 
-1. The move gives up real material - checked with a static exchange evaluation
-   on the destination square, which is cheap enough to run on every move.
+1. The move gives up real material - what it captures, minus what the opponent
+   can win back **anywhere on the board**, by static exchange evaluation. Both
+   halves matter. Ignore what the move takes and every routine recapture looks
+   like a sacrifice; look only at the square it lands on and most real
+   sacrifices are invisible, including Levon Aronian's 40...Kh7 in Round 4,
+   a king move that gave up 3.2 pawns sitting elsewhere.
 2. The position is still good for the player afterwards.
 3. Their evaluation did not drop.
 4. Stockfish agrees it is the best move **and** the second-best move is clearly
